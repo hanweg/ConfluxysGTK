@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document>
+  <metadata>
+    <title>Sample XML Document</title>
+    <author>Test Author</author>
+    <created>2025-01-19</created>
+    <version>1.0</version>
+  </metadata>
+  <content>
+    <section id="intro">
+      <heading>Introduction</heading>
+      <paragraph>This is a sample XML document that demonstrates the XML ingestion capability of the Confluxys system.</paragraph>
+      <paragraph>XML documents can contain structured data that can be extracted and indexed.</paragraph>
+    </section>
+    <section id="data">
+      <heading>Sample Data</heading>
+      <items>
+        <item type="product" id="1">
+          <name>Widget A</name>
+          <price currency="USD">19.99</price>
+          <stock>150</stock>
+        </item>
+        <item type="product" id="2">
+          <name>Widget B</name>
+          <price currency="USD">29.99</price>
+          <stock>75</stock>
+        </item>
+      </items>
+    </section>
+    <section id="conclusion">
+      <heading>Conclusion</heading>
+      <paragraph>This document successfully demonstrates XML structure and content extraction.</paragraph>
+    </section>
+  </content>
+</document>

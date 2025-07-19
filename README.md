@@ -3,7 +3,7 @@ Confluxys Document Management System, built with C# and GTK.
 
 ## Features
 
-- **PDF Document Ingestion** - Import individual files or entire folders
+- **Multi-format Document Ingestion** - Import PDF, TXT, MD, CSV, JSON, XML and more
 - **Template Creation** - Define templates for structured data extraction
 - **SQLite Database** with FTS5 full-text search
 - **SQLite Query Interface** - Execute custom queries with history navigation
@@ -33,17 +33,28 @@ The executable will be in `bin/Release/net9.0/linux-x64/publish/`
 
 ## Usage
 
-1. **Ingest Documents**: File → Ingest PDF Files/Folder
+1. **Ingest Documents**: File → Ingest Documents/Folder
 2. **Query Database**: Use the SQL editor (F5 to execute)
 3. **Browse Tables**: Click tables in the Database Explorer
 4. **Navigate History**: Use < > buttons for query history
-5. **View Text**: Toggle 
+5. **View Text**: Toggle between query editor and document preview (extracted text - raw and layout-preserved)
+
+## Supported File Types
+
+- **PDF** (.pdf) - Full text and layout extraction using PdfPig
+- **Plain Text** (.txt, .log, .cfg, .conf, .ini) - Direct text reading
+- **Markdown** (.md) - Markdown document support
+- **CSV/TSV** (.csv, .tsv) - Tabular data with automatic delimiter detection
+- **JSON** (.json, .jsonl, .ndjson) - Structured JSON with formatting
+- **XML** (.xml, .xhtml, .svg, .rss, .atom) - XML with text extraction
+- **YAML** (.yaml, .yml) - Configuration file support
 
 ## Architecture
 
 - **GTK UI**: Cross-platform GUI framework
 - **PdfPig**: PDF text extraction (replaced iText7 for better Linux compatibility)
 - **Microsoft.Data.Sqlite**: SQLite database with FTS5
+- **Extensible Text Extractors**: Plugin-style architecture for file type support
 - **MVVM-ready**: Structured for future enhancements
 
 ## 001 improvements
@@ -168,9 +179,74 @@ The application now supports full template editing functionality:
   The implementation allows users to easily modify their templates, adjust regex patterns, add/remove fields, and maintain the same workflow they
   used when creating the template initially.
 
+## Multi-Format Document Ingestion
+
+The application now supports ingesting multiple file types beyond PDFs:
+
+1. **Extensible Architecture**:
+   - Created `ITextExtractor` interface for file type abstraction
+   - Implemented extractors for PDF, TXT, CSV, JSON, XML formats
+   - `TextExtractorFactory` handles file type detection and extractor selection
+
+2. **Supported Formats**:
+   - Each extractor handles specific file extensions
+   - Automatic format detection based on file extension
+   - Preserves both raw and formatted text for better searchability
+
+3. **UI Updates**:
+   - "Ingest Documents" menu item replaces "Ingest PDF Files"
+   - File chooser shows all supported formats with appropriate filters
+   - Folder ingestion automatically finds all supported file types
+
+4. **Implementation Details**:
+   - CSV files: Auto-detects delimiters, formats as table layout
+   - JSON files: Pretty-prints for readability, supports JSON Lines format
+   - XML files: Extracts both structure and text content
+   - Plain text: Direct ingestion with line-based page estimation
+
+This feature makes Confluxys truly file-type agnostic for text-based documents.
+
+## Implementation Details
+  1. Created Extensible Architecture
+
+  - ITextExtractor interface: Defines the contract for all text extractors
+  - Individual extractors for each file type:
+    - PdfTextExtractor: Handles PDF files using PdfPig
+    - PlainTextExtractor: Handles .txt, .md, .log, .cfg, .conf, .ini, .yaml, .yml
+    - CsvTextExtractor: Handles .csv, .tsv with delimiter detection
+    - JsonTextExtractor: Handles .json, .jsonl, .ndjson with formatting
+    - XmlTextExtractor: Handles .xml, .xhtml, .svg, .rss, .atom
+  - TextExtractorFactory: Manages extractor selection based on file type
+
+  2. Updated Core Services
+
+  - Modified DocumentService to use the factory pattern
+  - Removed PDF-specific code and made it file-type agnostic
+  - Added methods to get supported extensions and file filters
+
+  3. Updated UI
+
+  - Changed menu items from "Ingest PDF Files" to "Ingest Documents"
+  - Updated file chooser to show all supported formats with appropriate filters
+  - Modified folder ingestion to find all supported file types
+
+  4. Created Test Files
+
+  - Sample files for each supported format in sample_texts/ directory
+  - Demonstrates various content types and structures
+
+  5. Documentation
+
+  - Updated README with supported file types
+  - Added implementation details section
+  - Marked the todo item as completed
+
+  The implementation follows SOLID principles with a clean separation of concerns, making it easy to add support for additional file types in the
+  future by simply creating new extractor classes that implement the ITextExtractor interface.
+
 ## Todo
 - Fix cell selection / right-click context menu issues in GTK# TreeView
-- Add ability to ingest *any* file with text (e.g. .txt, .md, .csv, .json, .xml + others)
+- ~~Add ability to ingest *any* file with text (e.g. .txt, .md, .csv, .json, .xml + others)~~
 - Implement full-text search across all text-based files - eliminate truncation in results.
 - ~~Maintain Database Explorer state across sessions (collapse/expand state, selected table, etc.)~~
 - ~~Add user editable regex patterns for each field in template creation / editing~~

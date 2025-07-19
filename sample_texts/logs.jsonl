@@ -1,0 +1,6 @@
+{"timestamp": "2025-01-19T10:00:00Z", "level": "INFO", "message": "Application started", "module": "main"}
+{"timestamp": "2025-01-19T10:00:05Z", "level": "DEBUG", "message": "Database connection established", "module": "database"}
+{"timestamp": "2025-01-19T10:00:10Z", "level": "INFO", "message": "Ingesting document: sample.pdf", "module": "ingestion"}
+{"timestamp": "2025-01-19T10:00:15Z", "level": "WARNING", "message": "Large file detected", "module": "ingestion", "file_size_mb": 25}
+{"timestamp": "2025-01-19T10:00:20Z", "level": "INFO", "message": "Document ingested successfully", "module": "ingestion", "document_id": 123}
+{"timestamp": "2025-01-19T10:00:25Z", "level": "ERROR", "message": "Failed to extract text", "module": "extraction", "error": "Invalid PDF structure"}

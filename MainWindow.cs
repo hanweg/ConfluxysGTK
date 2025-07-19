@@ -97,7 +97,7 @@ namespace Confluxys
             var fileMenuItem = new MenuItem("File");
             fileMenuItem.Submenu = fileMenu;
 
-            var ingestFilesItem = new MenuItem("Ingest PDF Files...");
+            var ingestFilesItem = new MenuItem("Ingest Documents...");
             ingestFilesItem.Activated += OnIngestFiles;
             fileMenu.Append(ingestFilesItem);
 
@@ -518,7 +518,7 @@ namespace Confluxys
         private void OnIngestFiles(object? sender, EventArgs e)
         {
             using (var fileChooser = new FileChooserDialog(
-                "Select PDF files to ingest",
+                "Select documents to ingest",
                 this,
                 FileChooserAction.Open,
                 "Cancel", ResponseType.Cancel,
@@ -526,10 +526,18 @@ namespace Confluxys
             {
                 fileChooser.SelectMultiple = true;
                 
-                var filter = new FileFilter();
-                filter.Name = "PDF files";
-                filter.AddPattern("*.pdf");
-                fileChooser.AddFilter(filter);
+                // Add file filters for all supported file types
+                var fileFilters = _documentService.GetFileFilters();
+                foreach (var (name, extensions) in fileFilters)
+                {
+                    var filter = new FileFilter();
+                    filter.Name = name;
+                    foreach (var ext in extensions)
+                    {
+                        filter.AddPattern($"*{ext}");
+                    }
+                    fileChooser.AddFilter(filter);
+                }
 
                 if (fileChooser.Run() == (int)ResponseType.Accept)
                 {
@@ -567,7 +575,7 @@ namespace Confluxys
         private void OnIngestFolder(object? sender, EventArgs e)
         {
             using (var folderChooser = new FileChooserDialog(
-                "Select folder to ingest PDF files from",
+                "Select folder to ingest documents from",
                 this,
                 FileChooserAction.SelectFolder,
                 "Cancel", ResponseType.Cancel,
@@ -578,12 +586,21 @@ namespace Confluxys
                     var folderPath = folderChooser.Filename;
                     folderChooser.Hide();
                     
-                    var pdfFiles = Directory.GetFiles(folderPath, "*.pdf", SearchOption.AllDirectories);
+                    // Get all supported file extensions
+                    var supportedExtensions = _documentService.GetSupportedExtensions();
+                    var allFiles = new List<string>();
+                    
+                    // Find all files with supported extensions
+                    foreach (var ext in supportedExtensions)
+                    {
+                        var files = Directory.GetFiles(folderPath, $"*{ext}", SearchOption.AllDirectories);
+                        allFiles.AddRange(files);
+                    }
                     
                     var ingestedCount = 0;
                     var errors = new List<string>();
 
-                    foreach (var file in pdfFiles)
+                    foreach (var file in allFiles)
                     {
                         try
                         {
@@ -596,7 +613,7 @@ namespace Confluxys
                         }
                     }
 
-                    var message = $"Ingested {ingestedCount} documents from {pdfFiles.Length} PDF files found.";
+                    var message = $"Ingested {ingestedCount} documents from {allFiles.Count} files found.";
                     if (errors.Any())
                     {
                         message += $"\n\nErrors:\n{string.Join("\n", errors.Take(10))}";

@@ -5,19 +5,20 @@ using System.Text;
 using System.Data;
 using System.IO;
 using System.Linq;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
 using Confluxys.Models;
+using Confluxys.Services.TextExtractors;
 
 namespace Confluxys.Services;
 
 public class DocumentService
 {
     private readonly DatabaseService _databaseService;
+    private readonly TextExtractorFactory _textExtractorFactory;
 
     public DocumentService()
     {
         _databaseService = new DatabaseService();
+        _textExtractorFactory = new TextExtractorFactory();
     }
 
     public void IngestDocument(string filePath)
@@ -40,12 +41,25 @@ public class DocumentService
             IngestedDate = DateTime.Now
         };
 
-        var (rawText, layoutText, pageCount) = ExtractTextFromPdf(filePath);
+        // Use the text extractor factory to get the appropriate extractor
+        var extractor = _textExtractorFactory.GetExtractor(filePath);
+        var (rawText, layoutText, pageCount) = extractor.ExtractText(filePath);
+        
         document.RawText = rawText;
         document.LayoutText = layoutText;
         document.PageCount = pageCount;
 
         _databaseService.InsertDocument(document);
+    }
+    
+    public string[] GetSupportedExtensions()
+    {
+        return _textExtractorFactory.GetAllSupportedExtensions();
+    }
+    
+    public List<(string Name, string[] Extensions)> GetFileFilters()
+    {
+        return _textExtractorFactory.GetFileFilters();
     }
 
     private string CalculateFileHash(string filePath)
@@ -56,61 +70,6 @@ public class DocumentService
         return Convert.ToHexString(hashBytes);
     }
 
-    private (string rawText, string layoutText, int pageCount) ExtractTextFromPdf(string filePath)
-    {
-        var rawTextBuilder = new StringBuilder();
-        var layoutTextBuilder = new StringBuilder();
-        int pageCount = 0;
-
-        try
-        {
-            using (var document = PdfDocument.Open(filePath))
-            {
-                pageCount = document.NumberOfPages;
-
-                for (int pageNum = 1; pageNum <= pageCount; pageNum++)
-                {
-                    var page = document.GetPage(pageNum);
-                    
-                    rawTextBuilder.AppendLine($"--- Page {pageNum} ---");
-                    rawTextBuilder.AppendLine(page.Text);
-                    rawTextBuilder.AppendLine();
-
-                    layoutTextBuilder.AppendLine($"--- Page {pageNum} ---");
-                    
-                    var words = page.GetWords().OrderBy(w => w.BoundingBox.Bottom).ThenBy(w => w.BoundingBox.Left);
-                    
-                    double? lastY = null;
-                    var lineBuilder = new StringBuilder();
-                    
-                    foreach (var word in words)
-                    {
-                        if (lastY.HasValue && Math.Abs(word.BoundingBox.Bottom - lastY.Value) > 1)
-                        {
-                            layoutTextBuilder.AppendLine(lineBuilder.ToString().TrimEnd());
-                            lineBuilder.Clear();
-                        }
-                        
-                        lineBuilder.Append(word.Text + " ");
-                        lastY = word.BoundingBox.Bottom;
-                    }
-                    
-                    if (lineBuilder.Length > 0)
-                    {
-                        layoutTextBuilder.AppendLine(lineBuilder.ToString().TrimEnd());
-                    }
-                    
-                    layoutTextBuilder.AppendLine();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Error extracting text from PDF: {ex.Message}", ex);
-        }
-
-        return (rawTextBuilder.ToString(), layoutTextBuilder.ToString(), pageCount);
-    }
 
     public List<Document> GetDocuments()
     {
