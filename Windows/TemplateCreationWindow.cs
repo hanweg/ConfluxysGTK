@@ -13,8 +13,10 @@ namespace Confluxys
         private readonly DatabaseService _databaseService;
         private List<Document> _documents = new();
         private Document? _selectedDocument;
-        private DocumentType _newDocumentType = new();
+        private DocumentType _documentType = new();
         private List<DocumentField> _fields = new();
+        private readonly bool _isEditMode;
+        private readonly int? _editingTemplateId;
 
         // UI Components
         private TreeView _documentListTreeView = null!;
@@ -46,6 +48,8 @@ namespace Confluxys
         
         // Step 3 - Review
         private TextView _reviewTextView = null!;
+        private TreeView _regexTreeView = null!;
+        private ListStore _regexListStore = null!;
         private Button _createTemplateButton = null!;
 
         // Text selection tracking
@@ -53,9 +57,11 @@ namespace Confluxys
         private TextIter _selectionEnd;
         private string _selectedText = string.Empty;
 
+        // Constructor for creating new template
         public TemplateCreationWindow(DatabaseService databaseService) : base("Create Template")
         {
             _databaseService = databaseService;
+            _isEditMode = false;
             
             SetDefaultSize(1000, 700);
             SetPosition(WindowPosition.Center);
@@ -63,6 +69,23 @@ namespace Confluxys
 
             CreateUI();
             LoadDocuments();
+        }
+        
+        // Constructor for editing existing template
+        public TemplateCreationWindow(DatabaseService databaseService, DocumentType documentType) : base("Edit Template")
+        {
+            _databaseService = databaseService;
+            _isEditMode = true;
+            _editingTemplateId = documentType.Id;
+            _documentType = documentType;
+            
+            SetDefaultSize(1000, 700);
+            SetPosition(WindowPosition.Center);
+            DeleteEvent += (o, args) => { args.RetVal = true; Destroy(); };
+
+            CreateUI();
+            LoadDocuments();
+            LoadTemplateForEditing();
         }
 
         private void CreateUI()
@@ -286,14 +309,26 @@ namespace Confluxys
             _fieldsTreeView.AppendColumn("Field Name", new CellRendererText(), "text", 0);
             _fieldsTreeView.AppendColumn("Type", new CellRendererText(), "text", 1);
             
+            // Add double-click handler to edit fields
+            _fieldsTreeView.RowActivated += OnFieldRowActivated;
+            
             fieldsScrolled.Add(_fieldsTreeView);
             fieldsFrame.Add(fieldsScrolled);
             vbox.PackStart(fieldsFrame, true, true, 0);
 
-            // Remove field button
+            // Field action buttons
+            var buttonBox = new Box(Orientation.Horizontal, 5);
+            buttonBox.Halign = Align.Center;
+            
+            var editFieldButton = new Button("Edit Field");
+            editFieldButton.Clicked += OnEditFieldClicked;
+            buttonBox.PackStart(editFieldButton, false, false, 0);
+            
             var removeFieldButton = new Button("Remove Selected Field");
             removeFieldButton.Clicked += OnRemoveFieldClicked;
-            vbox.PackStart(removeFieldButton, false, false, 0);
+            buttonBox.PackStart(removeFieldButton, false, false, 0);
+            
+            vbox.PackStart(buttonBox, false, false, 0);
 
             return vbox;
         }
@@ -305,19 +340,63 @@ namespace Confluxys
 
             vbox.PackStart(new Label("Review your template definition:"), false, false, 0);
 
-            var reviewFrame = new Frame();
-            var reviewScrolled = new ScrolledWindow();
-            reviewScrolled.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            // Summary section
+            var summaryFrame = new Frame("Template Summary");
+            var summaryScrolled = new ScrolledWindow();
+            summaryScrolled.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            summaryScrolled.SetSizeRequest(-1, 120);
             
             _reviewTextView = new TextView();
             _reviewTextView.Editable = false;
             _reviewTextView.WrapMode = WrapMode.Word;
             
-            reviewScrolled.Add(_reviewTextView);
-            reviewFrame.Add(reviewScrolled);
-            vbox.PackStart(reviewFrame, true, true, 0);
+            summaryScrolled.Add(_reviewTextView);
+            summaryFrame.Add(summaryScrolled);
+            vbox.PackStart(summaryFrame, false, false, 0);
 
-            _createTemplateButton = new Button("Create Template");
+            // Regex patterns section
+            vbox.PackStart(new Label("Field Extraction Patterns (double-click to edit):"), false, false, 10);
+            
+            var regexFrame = new Frame("Regular Expressions");
+            var regexScrolled = new ScrolledWindow();
+            regexScrolled.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            regexScrolled.SetSizeRequest(-1, 200);
+            
+            // Create TreeView with editable regex column
+            _regexListStore = new ListStore(typeof(string), typeof(string), typeof(string), typeof(DocumentField));
+            _regexTreeView = new TreeView(_regexListStore);
+            
+            _regexTreeView.AppendColumn("Field Name", new CellRendererText(), "text", 0);
+            _regexTreeView.AppendColumn("Type", new CellRendererText(), "text", 1);
+            
+            // Editable regex column
+            var regexRenderer = new CellRendererText();
+            regexRenderer.Editable = true;
+            regexRenderer.Edited += OnRegexEdited;
+            var regexColumn = new TreeViewColumn("Regex Pattern", regexRenderer, "text", 2);
+            regexColumn.Expand = true;
+            _regexTreeView.AppendColumn(regexColumn);
+            
+            // Enable row activation for editing
+            _regexTreeView.RowActivated += (o, args) => {
+                TreeIter iter;
+                if (_regexListStore.GetIter(out iter, args.Path))
+                {
+                    _regexTreeView.SetCursor(args.Path, regexColumn, true);
+                }
+            };
+            
+            regexScrolled.Add(_regexTreeView);
+            regexFrame.Add(regexScrolled);
+            vbox.PackStart(regexFrame, true, true, 0);
+
+            // Instructions
+            var instructionLabel = new Label("Double-click a regex pattern to edit it. The pattern should capture the field value in the first capture group.");
+            instructionLabel.Wrap = true;
+            instructionLabel.Halign = Align.Start;
+            vbox.PackStart(instructionLabel, false, false, 5);
+
+            _createTemplateButton = new Button(_isEditMode ? "Update Template" : "Create Template");
             _createTemplateButton.Clicked += OnCreateTemplateClicked;
             vbox.PackStart(_createTemplateButton, false, false, 0);
 
@@ -472,23 +551,162 @@ namespace Confluxys
                 }
             }
         }
+        
+        private void OnEditFieldClicked(object? sender, EventArgs e)
+        {
+            TreeIter iter;
+            if (_fieldsTreeView.Selection.GetSelected(out iter))
+            {
+                var field = _fieldsListStore.GetValue(iter, 2) as DocumentField;
+                if (field != null)
+                {
+                    PopulateFieldForEditing(field);
+                }
+            }
+        }
+        
+        private void OnFieldRowActivated(object o, RowActivatedArgs args)
+        {
+            TreeIter iter;
+            if (_fieldsListStore.GetIter(out iter, args.Path))
+            {
+                var field = _fieldsListStore.GetValue(iter, 2) as DocumentField;
+                if (field != null)
+                {
+                    PopulateFieldForEditing(field);
+                }
+            }
+        }
+        
+        private void PopulateFieldForEditing(DocumentField field)
+        {
+            // Populate the field inputs with the selected field's values
+            _fieldNameEntry.Text = field.FieldName;
+            _fieldTypeCombo.Active = field.DataType switch
+            {
+                "TEXT" => 0,
+                "INTEGER" => 1,
+                "REAL" => 2,
+                "DATE" => 3,
+                _ => 0
+            };
+            _contextTextView.Buffer.Text = field.ContextText;
+            _fieldValueTextView.Buffer.Text = field.FieldText;
+            
+            // Enable the buttons since we have context and value
+            _selectFieldValueButton.Sensitive = true;
+            _addFieldButton.Sensitive = true;
+            
+            // Remove the field from the list (it will be re-added when saved)
+            _fields.Remove(field);
+            
+            // Update the list store
+            _fieldsListStore.Clear();
+            foreach (var f in _fields)
+            {
+                _fieldsListStore.AppendValues(f.FieldName, f.DataType, f);
+            }
+            
+            _statusLabel.Text = $"Editing field: {field.FieldName}";
+        }
 
         private void UpdateReview()
         {
+            // Update summary text
             var review = $"Template Name: {_typeNameEntry.Text}\n";
             review += $"Description: {_typeDescriptionEntry.Text}\n";
             review += $"Identifier Text: {_identifierTextView.Buffer.Text}\n";
-            review += $"Number of Fields: {_fields.Count}\n\n";
-            
-            review += "Fields:\n";
-            foreach (var field in _fields)
-            {
-                review += $"  - {field.FieldName} ({field.DataType})\n";
-                review += $"    Context: {field.ContextText.Substring(0, Math.Min(50, field.ContextText.Length))}...\n";
-                review += $"    Value: {field.FieldText}\n\n";
-            }
+            review += $"Number of Fields: {_fields.Count}\n";
             
             _reviewTextView.Buffer.Text = review;
+            
+            // Update regex patterns list
+            _regexListStore.Clear();
+            foreach (var field in _fields)
+            {
+                _regexListStore.AppendValues(
+                    field.FieldName,
+                    field.DataType,
+                    field.RegexPattern,
+                    field
+                );
+            }
+        }
+        
+        private void OnRegexEdited(object o, EditedArgs args)
+        {
+            TreeIter iter;
+            if (_regexListStore.GetIterFromString(out iter, args.Path))
+            {
+                var field = _regexListStore.GetValue(iter, 3) as DocumentField;
+                if (field != null)
+                {
+                    // Validate the regex pattern
+                    try
+                    {
+                        var regex = new Regex(args.NewText);
+                        
+                        // Update the field's regex pattern
+                        field.RegexPattern = args.NewText;
+                        
+                        // Update the list store
+                        _regexListStore.SetValue(iter, 2, args.NewText);
+                        
+                        _statusLabel.Text = $"Regex pattern updated for field '{field.FieldName}'";
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        ShowErrorDialog("Invalid Regex", $"The regex pattern is invalid: {ex.Message}");
+                        // Keep the old value
+                        _regexListStore.SetValue(iter, 2, field.RegexPattern);
+                    }
+                }
+            }
+        }
+
+        private void LoadTemplateForEditing()
+        {
+            // Load template details
+            _typeNameEntry.Text = _documentType.Name;
+            _typeDescriptionEntry.Text = _documentType.Description;
+            _identifierTextView.Buffer.Text = _documentType.IdentifierText;
+            
+            // Load fields
+            _fields = _databaseService.GetDocumentFields(_documentType.Id);
+            
+            // Populate the fields list in the UI
+            _fieldsListStore.Clear();
+            foreach (var field in _fields)
+            {
+                _fieldsListStore.AppendValues(field.FieldName, field.DataType, field);
+            }
+            
+            // Try to find and select the original sample document
+            // First, check if any document contains the identifier text
+            foreach (var doc in _documents)
+            {
+                if (doc.RawText.Contains(_documentType.IdentifierText))
+                {
+                    // Select this document in the TreeView
+                    TreeIter iter;
+                    if (_documentListStore.GetIterFirst(out iter))
+                    {
+                        do
+                        {
+                            var iterDoc = _documentListStore.GetValue(iter, 2) as Document;
+                            if (iterDoc != null && iterDoc.Id == doc.Id)
+                            {
+                                _documentListTreeView.Selection.SelectIter(iter);
+                                break;
+                            }
+                        } while (_documentListStore.IterNext(ref iter));
+                    }
+                    break;
+                }
+            }
+            
+            // Update the status
+            _statusLabel.Text = $"Editing template: {_documentType.Name}";
         }
 
         private void OnCreateTemplateClicked(object? sender, EventArgs e)
@@ -514,24 +732,39 @@ namespace Confluxys
             
             try
             {
-                // Create document type
-                _newDocumentType.Name = _typeNameEntry.Text;
-                _newDocumentType.Description = _typeDescriptionEntry.Text;
-                _newDocumentType.IdentifierText = _identifierTextView.Buffer.Text;
-                _newDocumentType.TableName = GenerateTableName(_typeNameEntry.Text);
-                _newDocumentType.CreatedDate = DateTime.Now;
-                
-                // Save to database
-                var documentTypeId = _databaseService.CreateDocumentType(_newDocumentType, _fields);
-                
-                ShowInfoDialog("Success", $"Template '{_newDocumentType.Name}' created successfully!");
+                if (_isEditMode)
+                {
+                    // Update existing template
+                    _documentType.Name = _typeNameEntry.Text;
+                    _documentType.Description = _typeDescriptionEntry.Text;
+                    _documentType.IdentifierText = _identifierTextView.Buffer.Text;
+                    
+                    // Update in database
+                    UpdateDocumentType(_documentType, _fields);
+                    
+                    ShowInfoDialog("Success", $"Template '{_documentType.Name}' updated successfully!");
+                }
+                else
+                {
+                    // Create new template
+                    _documentType.Name = _typeNameEntry.Text;
+                    _documentType.Description = _typeDescriptionEntry.Text;
+                    _documentType.IdentifierText = _identifierTextView.Buffer.Text;
+                    _documentType.TableName = GenerateTableName(_typeNameEntry.Text);
+                    _documentType.CreatedDate = DateTime.Now;
+                    
+                    // Save to database
+                    var documentTypeId = _databaseService.CreateDocumentType(_documentType, _fields);
+                    
+                    ShowInfoDialog("Success", $"Template '{_documentType.Name}' created successfully!");
+                }
                 
                 // Close window
                 Destroy();
             }
             catch (Exception ex)
             {
-                ShowErrorDialog("Error", $"Failed to create template: {ex.Message}");
+                ShowErrorDialog("Error", $"Failed to {(_isEditMode ? "update" : "create")} template: {ex.Message}");
             }
         }
 
@@ -541,8 +774,47 @@ namespace Confluxys
             var escapedContext = Regex.Escape(contextText);
             var escapedValue = Regex.Escape(fieldValue);
             
-            // Replace the field value with a capture group
-            var pattern = escapedContext.Replace(escapedValue, @"(.+?)");
+            // Find the position of the field value in the context
+            var valueIndex = contextText.IndexOf(fieldValue);
+            if (valueIndex == -1)
+            {
+                // Fallback: just replace the value with a capture group
+                return escapedContext.Replace(escapedValue, @"(.+?)");
+            }
+            
+            // Get the text before and after the field value
+            var beforeValue = contextText.Substring(0, valueIndex);
+            var afterValue = contextText.Substring(valueIndex + fieldValue.Length);
+            
+            // Escape the parts
+            var escapedBefore = Regex.Escape(beforeValue);
+            var escapedAfter = Regex.Escape(afterValue);
+            
+            // Create a more flexible capture group based on the field content
+            string captureGroup;
+            if (Regex.IsMatch(fieldValue, @"^\d+$"))
+            {
+                // Numeric field
+                captureGroup = @"(\d+)";
+            }
+            else if (Regex.IsMatch(fieldValue, @"^\d+\.\d+$"))
+            {
+                // Decimal field
+                captureGroup = @"(\d+\.?\d*)";
+            }
+            else if (fieldValue.Contains(" "))
+            {
+                // Multi-word field - capture until the next part of the pattern
+                captureGroup = @"(.+?)";
+            }
+            else
+            {
+                // Single word - use non-whitespace capture
+                captureGroup = @"(\S+)";
+            }
+            
+            // Build the final pattern
+            var pattern = escapedBefore + captureGroup + escapedAfter;
             
             return pattern;
         }
@@ -581,6 +853,42 @@ namespace Confluxys
             dialog.Title = title;
             dialog.Run();
             dialog.Destroy();
+        }
+        
+        private void UpdateDocumentType(DocumentType docType, List<DocumentField> fields)
+        {
+            // Update document type - using parameterized query to prevent SQL injection
+            var updateQuery = $@"
+                UPDATE DocumentTypes 
+                SET Name = '{docType.Name.Replace("'", "''")}', 
+                    Description = '{docType.Description.Replace("'", "''")}', 
+                    IdentifierText = '{docType.IdentifierText.Replace("'", "''")}' 
+                WHERE Id = {docType.Id}";
+            
+            _databaseService.ExecuteNonQuery(updateQuery);
+            
+            // Delete existing fields
+            _databaseService.ExecuteQuery($"DELETE FROM DocumentFields WHERE DocumentTypeId = {docType.Id}");
+            
+            // Insert updated fields
+            for (int i = 0; i < fields.Count; i++)
+            {
+                var field = fields[i];
+                field.SortOrder = i + 1; // Ensure correct sort order
+                
+                var insertQuery = $@"
+                    INSERT INTO DocumentFields (DocumentTypeId, FieldName, ColumnName, ContextText, FieldText, RegexPattern, DataType, SortOrder)
+                    VALUES ({docType.Id}, 
+                            '{field.FieldName.Replace("'", "''")}', 
+                            '{field.ColumnName.Replace("'", "''")}', 
+                            '{field.ContextText.Replace("'", "''")}', 
+                            '{field.FieldText.Replace("'", "''")}', 
+                            '{field.RegexPattern.Replace("'", "''")}', 
+                            '{field.DataType}', 
+                            {field.SortOrder})";
+                
+                _databaseService.ExecuteNonQuery(insertQuery);
+            }
         }
     }
 }

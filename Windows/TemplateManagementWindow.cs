@@ -208,7 +208,14 @@ namespace Confluxys
                 var docType = _templatesListStore.GetValue(iter, 3) as DocumentType;
                 if (docType != null)
                 {
-                    ShowInfoDialog("Edit Template", "Template editing functionality is not yet implemented.\n\nTo modify templates, you can use SQL directly on the DocumentTypes and DocumentFields tables.");
+                    // Open template creation window in edit mode
+                    var editWindow = new TemplateCreationWindow(_databaseService, docType);
+                    editWindow.TransientFor = this;
+                    editWindow.Modal = true;
+                    editWindow.ShowAll();
+                    
+                    // Refresh templates when window is closed
+                    editWindow.Destroyed += (s, args) => LoadTemplates();
                 }
             }
         }

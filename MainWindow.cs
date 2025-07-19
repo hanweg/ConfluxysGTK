@@ -257,8 +257,15 @@ namespace Confluxys
             return vpaned;
         }
 
-        private void RefreshDatabaseExplorer()
+        private void RefreshDatabaseExplorer(bool preserveState = false)
         {
+            Dictionary<string, bool>? expandedStates = null;
+            
+            if (preserveState)
+            {
+                expandedStates = SaveTreeViewExpandedState();
+            }
+            
             _databaseTreeStore.Clear();
             
             var tables = _databaseService.GetTables();
@@ -272,7 +279,11 @@ namespace Confluxys
                 }
             }
             
-            _databaseTreeView.ExpandAll();
+            if (preserveState && expandedStates != null)
+            {
+                RestoreTreeViewExpandedState(expandedStates);
+            }
+            // Remove ExpandAll() to start with collapsed view
         }
 
         private void OnDatabaseTreeViewSelectionChanged(object? sender, EventArgs e)
@@ -506,97 +517,99 @@ namespace Confluxys
 
         private void OnIngestFiles(object? sender, EventArgs e)
         {
-            var fileChooser = new FileChooserDialog(
+            using (var fileChooser = new FileChooserDialog(
                 "Select PDF files to ingest",
                 this,
                 FileChooserAction.Open,
                 "Cancel", ResponseType.Cancel,
-                "Open", ResponseType.Accept);
-
-            fileChooser.SelectMultiple = true;
-            
-            var filter = new FileFilter();
-            filter.Name = "PDF files";
-            filter.AddPattern("*.pdf");
-            fileChooser.AddFilter(filter);
-
-            if (fileChooser.Run() == (int)ResponseType.Accept)
+                "Open", ResponseType.Accept))
             {
-                var files = fileChooser.Filenames;
-                var ingestedCount = 0;
-                var errors = new List<string>();
+                fileChooser.SelectMultiple = true;
+                
+                var filter = new FileFilter();
+                filter.Name = "PDF files";
+                filter.AddPattern("*.pdf");
+                fileChooser.AddFilter(filter);
 
-                foreach (var file in files)
+                if (fileChooser.Run() == (int)ResponseType.Accept)
                 {
-                    try
-                    {
-                        _documentService.IngestDocument(file);
-                        ingestedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"{System.IO.Path.GetFileName(file)}: {ex.Message}");
-                    }
-                }
+                    var files = fileChooser.Filenames;
+                    fileChooser.Hide();
+                    
+                    var ingestedCount = 0;
+                    var errors = new List<string>();
 
-                var message = $"Ingested {ingestedCount} documents.";
-                if (errors.Any())
-                {
-                    message += $"\n\nErrors:\n{string.Join("\n", errors)}";
-                }
+                    foreach (var file in files)
+                    {
+                        try
+                        {
+                            _documentService.IngestDocument(file);
+                            ingestedCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"{System.IO.Path.GetFileName(file)}: {ex.Message}");
+                        }
+                    }
 
-                ShowInfoDialog("Ingestion Complete", message);
-                RefreshDatabaseExplorer();
+                    var message = $"Ingested {ingestedCount} documents.";
+                    if (errors.Any())
+                    {
+                        message += $"\n\nErrors:\n{string.Join("\n", errors)}";
+                    }
+
+                    ShowInfoDialog("Ingestion Complete", message);
+                    RefreshDatabaseExplorer(preserveState: true);
+                }
             }
-
-            fileChooser.Destroy();
         }
 
         private void OnIngestFolder(object? sender, EventArgs e)
         {
-            var folderChooser = new FileChooserDialog(
+            using (var folderChooser = new FileChooserDialog(
                 "Select folder to ingest PDF files from",
                 this,
                 FileChooserAction.SelectFolder,
                 "Cancel", ResponseType.Cancel,
-                "Select", ResponseType.Accept);
-
-            if (folderChooser.Run() == (int)ResponseType.Accept)
+                "Select", ResponseType.Accept))
             {
-                var folderPath = folderChooser.Filename;
-                var pdfFiles = Directory.GetFiles(folderPath, "*.pdf", SearchOption.AllDirectories);
-                
-                var ingestedCount = 0;
-                var errors = new List<string>();
-
-                foreach (var file in pdfFiles)
+                if (folderChooser.Run() == (int)ResponseType.Accept)
                 {
-                    try
-                    {
-                        _documentService.IngestDocument(file);
-                        ingestedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"{System.IO.Path.GetFileName(file)}: {ex.Message}");
-                    }
-                }
+                    var folderPath = folderChooser.Filename;
+                    folderChooser.Hide();
+                    
+                    var pdfFiles = Directory.GetFiles(folderPath, "*.pdf", SearchOption.AllDirectories);
+                    
+                    var ingestedCount = 0;
+                    var errors = new List<string>();
 
-                var message = $"Ingested {ingestedCount} documents from {pdfFiles.Length} PDF files found.";
-                if (errors.Any())
-                {
-                    message += $"\n\nErrors:\n{string.Join("\n", errors.Take(10))}";
-                    if (errors.Count > 10)
+                    foreach (var file in pdfFiles)
                     {
-                        message += $"\n... and {errors.Count - 10} more errors";
+                        try
+                        {
+                            _documentService.IngestDocument(file);
+                            ingestedCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"{System.IO.Path.GetFileName(file)}: {ex.Message}");
+                        }
                     }
-                }
 
-                ShowInfoDialog("Ingestion Complete", message);
-                RefreshDatabaseExplorer();
+                    var message = $"Ingested {ingestedCount} documents from {pdfFiles.Length} PDF files found.";
+                    if (errors.Any())
+                    {
+                        message += $"\n\nErrors:\n{string.Join("\n", errors.Take(10))}";
+                        if (errors.Count > 10)
+                        {
+                            message += $"\n... and {errors.Count - 10} more errors";
+                        }
+                    }
+
+                    ShowInfoDialog("Ingestion Complete", message);
+                    RefreshDatabaseExplorer(preserveState: true);
+                }
             }
-
-            folderChooser.Destroy();
         }
 
         private void OnReprocessAll(object? sender, EventArgs e)
@@ -605,7 +618,7 @@ namespace Confluxys
             {
                 var count = _reprocessingService.ReprocessAllDocuments();
                 ShowInfoDialog("Reprocessing Complete", $"Processed {count} documents.");
-                RefreshDatabaseExplorer();
+                RefreshDatabaseExplorer(preserveState: true);
             }
             catch (Exception ex)
             {
@@ -922,121 +935,125 @@ namespace Confluxys
         {
             if (_currentResultsTable == null) return;
             
-            var fileChooser = new FileChooserDialog(
+            using (var fileChooser = new FileChooserDialog(
                 "Export to CSV",
                 this,
                 FileChooserAction.Save,
                 "Cancel", ResponseType.Cancel,
-                "Save", ResponseType.Accept);
-            
-            fileChooser.CurrentName = "results.csv";
-            var filter = new FileFilter();
-            filter.Name = "CSV files";
-            filter.AddPattern("*.csv");
-            fileChooser.AddFilter(filter);
-            
-            if (fileChooser.Run() == (int)ResponseType.Accept)
+                "Save", ResponseType.Accept))
             {
-                try
+                fileChooser.CurrentName = "results.csv";
+                var filter = new FileFilter();
+                filter.Name = "CSV files";
+                filter.AddPattern("*.csv");
+                fileChooser.AddFilter(filter);
+                
+                if (fileChooser.Run() == (int)ResponseType.Accept)
                 {
-                    using (var writer = new System.IO.StreamWriter(fileChooser.Filename))
-                    {
-                        // Write headers
-                        var headers = string.Join(",", _currentResultsTable.Columns.Cast<DataColumn>()
-                            .Select(c => $"\"{c.ColumnName.Replace("\"", "\"\"")}\""));
-                        writer.WriteLine(headers);
-                        
-                        // Write data
-                        foreach (DataRow row in _currentResultsTable.Rows)
-                        {
-                            var values = string.Join(",", row.ItemArray
-                                .Select(v => $"\"{(v?.ToString() ?? "").Replace("\"", "\"\"")}\""));
-                            writer.WriteLine(values);
-                        }
-                    }
+                    var filename = fileChooser.Filename;
+                    fileChooser.Hide();
                     
-                    _statusLabel.Text = $"Exported to {System.IO.Path.GetFileName(fileChooser.Filename)}";
-                }
-                catch (Exception ex)
-                {
-                    ShowErrorDialog("Export Error", $"Failed to export CSV: {ex.Message}");
+                    try
+                    {
+                        using (var writer = new System.IO.StreamWriter(filename))
+                        {
+                            // Write headers
+                            var headers = string.Join(",", _currentResultsTable.Columns.Cast<DataColumn>()
+                                .Select(c => $"\"{c.ColumnName.Replace("\"", "\"\"")}\""));
+                            writer.WriteLine(headers);
+                            
+                            // Write data
+                            foreach (DataRow row in _currentResultsTable.Rows)
+                            {
+                                var values = string.Join(",", row.ItemArray
+                                    .Select(v => $"\"{(v?.ToString() ?? "").Replace("\"", "\"\"")}\""));
+                                writer.WriteLine(values);
+                            }
+                        }
+                        
+                        _statusLabel.Text = $"Exported to {System.IO.Path.GetFileName(filename)}";
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowErrorDialog("Export Error", $"Failed to export CSV: {ex.Message}");
+                    }
                 }
             }
-            
-            fileChooser.Destroy();
         }
 
         private void OnSaveResultsAsDb(object? sender, EventArgs e)
         {
             if (_currentResultsTable == null) return;
             
-            var dialog = new Dialog("Save as Database", this, DialogFlags.Modal);
-            dialog.AddButton("Cancel", ResponseType.Cancel);
-            dialog.AddButton("Save", ResponseType.Ok);
-            
-            var vbox = new Box(Orientation.Vertical, 5);
-            vbox.BorderWidth = 10;
-            
-            vbox.PackStart(new Label("Table Name:"), false, false, 0);
-            var tableNameEntry = new Entry("results_export");
-            vbox.PackStart(tableNameEntry, false, false, 0);
-            
-            dialog.ContentArea.Add(vbox);
-            dialog.ShowAll();
-            
-            if (dialog.Run() == (int)ResponseType.Ok)
+            using (var dialog = new Dialog("Save as Database", this, DialogFlags.Modal))
             {
-                try
+                dialog.AddButton("Cancel", ResponseType.Cancel);
+                dialog.AddButton("Save", ResponseType.Ok);
+                
+                var vbox = new Box(Orientation.Vertical, 5);
+                vbox.BorderWidth = 10;
+                
+                vbox.PackStart(new Label("Table Name:"), false, false, 0);
+                var tableNameEntry = new Entry("results_export");
+                vbox.PackStart(tableNameEntry, false, false, 0);
+                
+                dialog.ContentArea.Add(vbox);
+                dialog.ShowAll();
+                
+                if (dialog.Run() == (int)ResponseType.Ok)
                 {
-                    var tableName = tableNameEntry.Text;
-                    if (!string.IsNullOrWhiteSpace(tableName))
+                    try
                     {
-                        _databaseService.CreateTableFromDataTable(_currentResultsTable, tableName);
-                        RefreshDatabaseExplorer();
-                        _statusLabel.Text = $"Results saved to table '{tableName}'";
+                        var tableName = tableNameEntry.Text;
+                        if (!string.IsNullOrWhiteSpace(tableName))
+                        {
+                            _databaseService.CreateTableFromDataTable(_currentResultsTable, tableName);
+                            RefreshDatabaseExplorer(preserveState: true);
+                            _statusLabel.Text = $"Results saved to table '{tableName}'";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowErrorDialog("Save Error", $"Failed to save as database: {ex.Message}");
                     }
                 }
-                catch (Exception ex)
-                {
-                    ShowErrorDialog("Save Error", $"Failed to save as database: {ex.Message}");
-                }
             }
-            
-            dialog.Destroy();
         }
 
         private void OnExportResultsToJson(object? sender, EventArgs e)
         {
             if (_currentResultsTable == null) return;
             
-            var fileChooser = new FileChooserDialog(
+            using (var fileChooser = new FileChooserDialog(
                 "Export to JSON",
                 this,
                 FileChooserAction.Save,
                 "Cancel", ResponseType.Cancel,
-                "Save", ResponseType.Accept);
-            
-            fileChooser.CurrentName = "results.json";
-            var filter = new FileFilter();
-            filter.Name = "JSON files";
-            filter.AddPattern("*.json");
-            fileChooser.AddFilter(filter);
-            
-            if (fileChooser.Run() == (int)ResponseType.Accept)
+                "Save", ResponseType.Accept))
             {
-                try
+                fileChooser.CurrentName = "results.json";
+                var filter = new FileFilter();
+                filter.Name = "JSON files";
+                filter.AddPattern("*.json");
+                fileChooser.AddFilter(filter);
+                
+                if (fileChooser.Run() == (int)ResponseType.Accept)
                 {
-                    var json = DataTableToJson(_currentResultsTable);
-                    System.IO.File.WriteAllText(fileChooser.Filename, json);
-                    _statusLabel.Text = $"Exported to {System.IO.Path.GetFileName(fileChooser.Filename)}";
-                }
-                catch (Exception ex)
-                {
-                    ShowErrorDialog("Export Error", $"Failed to export JSON: {ex.Message}");
+                    var filename = fileChooser.Filename;
+                    fileChooser.Hide();
+                    
+                    try
+                    {
+                        var json = DataTableToJson(_currentResultsTable);
+                        System.IO.File.WriteAllText(filename, json);
+                        _statusLabel.Text = $"Exported to {System.IO.Path.GetFileName(filename)}";
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowErrorDialog("Export Error", $"Failed to export JSON: {ex.Message}");
+                    }
                 }
             }
-            
-            fileChooser.Destroy();
         }
 
         private string DataTableToJson(DataTable table)
@@ -1181,28 +1198,69 @@ namespace Confluxys
             }
         }
 
+        private Dictionary<string, bool> SaveTreeViewExpandedState()
+        {
+            var expandedStates = new Dictionary<string, bool>();
+            
+            if (_databaseTreeStore.GetIterFirst(out TreeIter iter))
+            {
+                do
+                {
+                    var tableName = _databaseTreeStore.GetValue(iter, 0) as string;
+                    if (tableName != null)
+                    {
+                        var path = _databaseTreeStore.GetPath(iter);
+                        expandedStates[tableName] = _databaseTreeView.GetRowExpanded(path);
+                    }
+                } while (_databaseTreeStore.IterNext(ref iter));
+            }
+            
+            return expandedStates;
+        }
+        
+        private void RestoreTreeViewExpandedState(Dictionary<string, bool> expandedStates)
+        {
+            if (_databaseTreeStore.GetIterFirst(out TreeIter iter))
+            {
+                do
+                {
+                    var tableName = _databaseTreeStore.GetValue(iter, 0) as string;
+                    if (tableName != null && expandedStates.ContainsKey(tableName))
+                    {
+                        var path = _databaseTreeStore.GetPath(iter);
+                        if (expandedStates[tableName])
+                        {
+                            _databaseTreeView.ExpandRow(path, false);
+                        }
+                    }
+                } while (_databaseTreeStore.IterNext(ref iter));
+            }
+        }
+
         private void ShowInfoDialog(string title, string message)
         {
-            var dialog = new MessageDialog(this, 
+            using (var dialog = new MessageDialog(this, 
                 DialogFlags.DestroyWithParent,
                 MessageType.Info, 
                 ButtonsType.Ok, 
-                message);
-            dialog.Title = title;
-            dialog.Run();
-            dialog.Destroy();
+                message))
+            {
+                dialog.Title = title;
+                dialog.Run();
+            }
         }
 
         private void ShowErrorDialog(string title, string message)
         {
-            var dialog = new MessageDialog(this, 
+            using (var dialog = new MessageDialog(this, 
                 DialogFlags.DestroyWithParent,
                 MessageType.Error, 
                 ButtonsType.Ok, 
-                message);
-            dialog.Title = title;
-            dialog.Run();
-            dialog.Destroy();
+                message))
+            {
+                dialog.Title = title;
+                dialog.Run();
+            }
         }
 
         private void OnDeleteEvent(object o, DeleteEventArgs args)
