@@ -420,3 +420,6 @@ test_documents/
 # Ignore any configuration files with potential secrets
 appsettings.local.json
 *.config.local
+
+# Backup Readme
+b001-README.md
